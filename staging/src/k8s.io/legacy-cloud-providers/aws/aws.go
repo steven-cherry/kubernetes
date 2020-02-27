@@ -3588,6 +3588,9 @@ func buildListener(port v1.ServicePort, annotations map[string]string, sslPorts 
 	} else if annotationProtocol := annotations[ServiceAnnotationLoadBalancerBEProtocol]; annotationProtocol == "http" {
 		instanceProtocol = annotationProtocol
 		protocol = "http"
+	} else if annotationProtocol := annotations[ServiceAnnotationLoadBalancerBEProtocol]; annotationProtocol == "udp" {
+		instanceProtocol = annotationProtocol
+		protocol = "udp"
 	}
 
 	listener.Protocol = &protocol
@@ -3617,9 +3620,9 @@ func (c *Cloud) EnsureLoadBalancer(ctx context.Context, clusterName string, apiS
 
 	sslPorts := getPortSets(annotations[ServiceAnnotationLoadBalancerSSLPorts])
 	for _, port := range apiService.Spec.Ports {
-		if port.Protocol != v1.ProtocolTCP {
-			return nil, fmt.Errorf("Only TCP LoadBalancer is supported for AWS ELB")
-		}
+		//if port.Protocol != v1.ProtocolTCP {
+		//	return nil, fmt.Errorf("Only TCP LoadBalancer is supported for AWS ELB")
+		//}
 		if port.NodePort == 0 {
 			klog.Errorf("Ignoring port without NodePort defined: %v", port)
 			continue
@@ -3731,7 +3734,15 @@ func (c *Cloud) EnsureLoadBalancer(ctx context.Context, clusterName string, apiS
 			sourceRangeCidrs = append(sourceRangeCidrs, "0.0.0.0/0")
 		}
 
-		err = c.updateInstanceSecurityGroupsForNLB(loadBalancerName, instances, sourceRangeCidrs, v2Mappings)
+    annotationProtocol := strings.ToLower(annotations[ServiceAnnotationLoadBalancerBEProtocol])
+    var ruleProtocol string
+		if annotationProtocol == "udp" {
+			ruleProtocol = "udp"
+		} else {
+			ruleProtocol = "tcp"
+		}
+
+		err = c.updateInstanceSecurityGroupsForNLB(loadBalancerName, instances, sourceRangeCidrs, v2Mappings, ruleProtocol)
 		if err != nil {
 			klog.Warningf("Error opening ingress rules for the load balancer to the instances: %q", err)
 			return nil, err
@@ -4262,6 +4273,7 @@ func (c *Cloud) updateInstanceSecurityGroupsForLoadBalancer(lb *elb.LoadBalancer
 
 // EnsureLoadBalancerDeleted implements LoadBalancer.EnsureLoadBalancerDeleted.
 func (c *Cloud) EnsureLoadBalancerDeleted(ctx context.Context, clusterName string, service *v1.Service) error {
+  annotations := service.Annotations
 	loadBalancerName := c.GetLoadBalancerName(ctx, clusterName, service)
 
 	if isNLB(service.Annotations) {
@@ -4310,7 +4322,15 @@ func (c *Cloud) EnsureLoadBalancerDeleted(ctx context.Context, clusterName strin
 			}
 		}
 
-		return c.updateInstanceSecurityGroupsForNLB(loadBalancerName, nil, nil, nil)
+    annotationProtocol := strings.ToLower(annotations[ServiceAnnotationLoadBalancerBEProtocol])
+		var ruleProtocol string
+		if annotationProtocol == "udp" {
+			ruleProtocol = "udp"
+		} else {
+			ruleProtocol = "tcp"
+		}
+
+		return c.updateInstanceSecurityGroupsForNLB(loadBalancerName, nil, nil, nil, ruleProtocol)
 	}
 
 	lb, err := c.describeLoadBalancer(loadBalancerName)
